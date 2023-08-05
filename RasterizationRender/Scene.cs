@@ -11,22 +11,41 @@ namespace RasterizationRender
 
     public class Vertex
     {
-        public Vector3 Pos;
+        public Vector3 WorldPos;
         public Color Color;
+    }
+
+    public struct UV
+    {
+        public float u;
+        public float v;
+        public UV(float u, float v) { this.u = u;this.v=v; }
     }
     public struct Triangle
     {
         public int v0;
         public int v1;
         public int v2;
+        public UV uv0;
+        public UV uv1;
+        public UV uv2;
+        public Vector3 n0;
+        public Vector3 n1;
+        public Vector3 n2;
 
-
-        public Triangle(int v0, int v1, int v2)
+        public Triangle(int v0, int v1, int v2, UV uv0, UV uv1, UV uv2, Vector3 n0,Vector3 n1,Vector3 n2)
         {
             this.v0 = v0;
             this.v1 = v1;
             this.v2 = v2;
+            this.uv0 = uv0;
+            this.uv1 = uv1;
+            this.uv2 = uv2;
+            this.n0 = n0;
+            this.n1 = n1;
+            this.n2 = n2;
         }
+
     }
 
     //包围球
@@ -39,12 +58,11 @@ namespace RasterizationRender
     {
         public List<Vector3> Verteics; //顶点
         public List<Triangle> Trangles;//三角形
-        public List<Vector3> Normals;//法线
+        public List<Vector3> Normals;//三角形的法线
 
         //所有顶点距离原点最近点和最远点为直径
         public BoundingSphare GetBoundingSphare()
         {
-            BoundingSphare bs = new BoundingSphare();
             Vector3 near = Verteics[0], far = Verteics[0];
             foreach (var v in Verteics)
             {
@@ -59,6 +77,7 @@ namespace RasterizationRender
             }
 
             Vector3 d = far - near;
+            BoundingSphare bs = new BoundingSphare();
             bs.Pos = near + d / 2;
             bs.Radius = d.Length() / 2;
             return bs;
@@ -125,11 +144,15 @@ namespace RasterizationRender
 
     public class Material
     {
-        public Color Color = Color.Pink;//固有色
         public int Specular = 500;//高光系数
-        public float Reflective = 0;//反射系数 0没有反射 1完全反射
-        public float Opacity = 1;//不透明度 0完全透明 1完全不透明
-        public float Refraction = 1;//折射率 空气的折射率是1 水和玻璃是1.33、
+        public Bitmap Texture;//纹理
+
+        public Color GetColor(UV uv)
+        {
+            int x = (int)(uv.u * Texture.Width);
+            int y = (int)(uv.v * Texture.Height);
+            return Texture.GetPixel(x,y);
+        }
     }
 
     public class GameObject
@@ -252,14 +275,14 @@ namespace RasterizationRender
             return res;
         }
 
-
-        public void DrawShadedTriangles(List<Vertex> vertices, List<Triangle> triangles)
+        //绘制三角形面
+        public void DrawFilledTriangles(List<Vertex> vertices, List<Triangle> triangles)
         {
             List<Vector2> points = new List<Vector2>();
             List<Color> colors = new List<Color>();
             foreach (var v in vertices)
             {
-                points.Add(WorldToScreen(v.Pos));
+                points.Add(WorldToScreen(v.WorldPos));
                 colors.Add(v.Color);
             }
 
@@ -296,11 +319,11 @@ namespace RasterizationRender
             var c02 = InterpolateColor(P0.Y, P2.Y, C0, C2);
 
             float x1 = x12[0];
-            float x2 = x02[x01.Count];
+            float x2 = x02[x01.Count-1];
 
-            x01.RemoveAt(x01.Count - 1);
+            //x01.RemoveAt(x01.Count - 1);
             x01.AddRange(x12);
-            c01.RemoveAt(c01.Count - 1);
+            //c01.RemoveAt(c01.Count - 1);
             c01.AddRange(c12);
 
             var left = x01;
@@ -314,13 +337,12 @@ namespace RasterizationRender
                 (leftColor, rightColor) = (rightColor, leftColor);
             }
 
-            for (int y = y0; y <= y2; y++)
+            for (int y = y0; y < y2; y++)
             {
                 int i = y - y0;
                 DrawLine(new Vector2(left[i], y), new Vector2(right[i], y), leftColor[i], rightColor[i]);
             }
         }
-
 
         //绘制世界坐标顶点组成的三角形线框
         public void DrawWireframeTriangles(List<Vector3> vertices, List<Triangle> triangles)
@@ -336,6 +358,7 @@ namespace RasterizationRender
                 DrawTriangle(points[t.v0], points[t.v1], points[t.v2]);
             }
         }
+        
         //绘制一个三角形线框
         public void DrawTriangle(Vector2 P0, Vector2 P1, Vector2 P2)
         {
@@ -352,9 +375,12 @@ namespace RasterizationRender
         public float ZFar;//远平面
 
         public Transform Transform;
-        public List<Plane> mPlanes = new List<Plane>();
+        List<Plane> mPlanes = new List<Plane>();
 
-
+        public void Init()
+        {
+            //TODO 计算6个平面
+        }
         public GameObject ClipObject(GameObject go)
         {
             foreach (Plane p in mPlanes)
@@ -372,12 +398,12 @@ namespace RasterizationRender
         {
             var mesh = go.Mesh;
             var bs = mesh.GetBoundingSphare();
-            float d = SignedDistance(p, bs.Pos);
-            if (d > bs.Radius)//视野内
+            float sd = SignedDistance(p, bs.Pos);
+            if (sd > bs.Radius)//视野内
             {
                 return go;
             }
-            if (d < -bs.Radius)//视野外
+            if (sd < -bs.Radius)//视野外
             {
                 return null;
             }
@@ -385,6 +411,7 @@ namespace RasterizationRender
             return go;
         }
 
+        //平面上的点和平面法线点乘得到的投影距离都等于D
         float SignedDistance(Plane p, Vector3 v)
         {
             return v.X * p.Normal.X + v.Y * p.Normal.Y + v.Z + p.Normal.Z + p.D;
@@ -420,8 +447,10 @@ namespace RasterizationRender
         Camera mCamera;
         //屏幕
         Canvas mCanvas;
+        //深度缓存
+        float[] mZBuffer;
 
-        public void AddCanvase(Canvas canvas) { mCanvas = canvas; }
+        public void AddCanvase(Canvas canvas) { mCanvas = canvas; mZBuffer = new float[(int)canvas.Width * (int)canvas.Height]; }
         public void AddCamera(Camera cam) { mCamera = cam; }
         public void AddObject(GameObject obj) { mObjects.Add(obj); }
         public void AddLight(Light light) { mLights.Add(light); }
@@ -429,6 +458,7 @@ namespace RasterizationRender
         //渲染物体
         public void Render()
         {
+            //相机裁剪
             List<GameObject> clipObjects = new List<GameObject>();
             foreach (GameObject go in mObjects)
             {
@@ -449,21 +479,33 @@ namespace RasterizationRender
 
         void RenderObject(GameObject go)
         {
+            //MV变换
             if (go.Mesh != null)
             {
                 Transform t = go.Transform;
                 Transform ct = mCamera.Transform;
                 Matrix4x4 model = t.MakeYRotationMatrix() * t.MakeScaleMatrix() * t.MakeTranslationMatrix();
                 Matrix4x4 view = ct.MakeTranslationMatrix() * ct.MakeYRotationMatrix();
-                List<Vector3> trans = new List<Vector3>();
+                List<Vector3> vertics = new List<Vector3>();
                 foreach (var v in go.Mesh.Verteics)
                 {
                     Vector4 v4 = new Vector4(v, 1);
                     Vector4 vt = Multiply(view * model, v4);
-                    trans.Add(new Vector3(vt.X, vt.Y, vt.Z));
+                    Vector3 v3 = new Vector3(vt.X, vt.Y, vt.Z);
+                    vertics.Add(v3);
+                    //vertics.Add(new Vertex() { Color=go.Material.GetColor(v3), Pos = v3});
                 }
-                mCanvas.DrawWireframeTriangles(trans, go.Mesh.Trangles);
+                //mCanvas.DrawWireframeTriangles(trans, go.Mesh.Trangles);
+                //mCanvas.DrawFilledTriangles(vertics, go.Mesh.Trangles);
+
+                RenderTriangles(vertics, go.Mesh.Trangles);
             }
+        }
+
+        void RenderTriangles(List<Vector3> vertics, List<Triangle> triangles)
+        {
+            //三角形背面剔除
+
         }
 
         Vector4 Multiply(Matrix4x4 m4, Vector4 v4)
