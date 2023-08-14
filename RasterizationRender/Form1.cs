@@ -31,11 +31,18 @@ namespace RasterizationRender
 
             {
                 var camera = new Camera();
+                camera.ZNear = 1;
+                camera.ZFar = 100;
+                camera.FieldOfView = MathF.PI / 2;
+                camera.AspactRatio = 16.0f / 9.0f;
+
                 Transform ct = new Transform();
                 ct.Position = new Vector3(0, 0, 0);
                 ct.Rotation = new Vector3(0, 0, 0);
                 ct.Scale = new Vector3(1, 1, 1);
                 camera.Transform = ct;
+
+                camera.Init();
                 mScene.AddCamera(camera);
             }
             {
@@ -100,7 +107,7 @@ namespace RasterizationRender
 
             };
 
-            Bitmap Texture = new Bitmap("./crate-texture.jpg");
+            Bitmap Texture = new Bitmap("./data/crate-texture.jpg");
 
             Mesh m = new Mesh();
             m.Verteics = vertices;

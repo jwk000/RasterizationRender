@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RasterizationRender": {
+      "commandName": "Project",
+      "workingDirectory": "F:\\RasterizationRender\\RasterizationRender"
+    }
+  }
+}
