@@ -9,7 +9,6 @@ namespace RasterizationRender
             InitializeComponent();
             DoubleBuffered = true;
             ClientSize = new Size(1024, 768);
-            mCanvas = new Canvas(1024, 768);
             InitScene();
 
         }
@@ -17,17 +16,15 @@ namespace RasterizationRender
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            e.Graphics.DrawImage(mCanvas.Bitmap, 0, 0);
+            e.Graphics.DrawImage(mScene.FrameBuffer, 0, 0);
         }
 
 
-        Canvas mCanvas;
         Scene mScene;
 
         void InitScene()
         {
             mScene = new Scene();
-            mScene.AddCanvase(mCanvas);
 
             {
                 var camera = new Camera();
@@ -35,6 +32,8 @@ namespace RasterizationRender
                 camera.ZFar = 100;
                 camera.FieldOfView = MathF.PI / 2;
                 camera.AspactRatio = 16.0f / 9.0f;
+                camera.Width = 1024;
+                camera.Height = 768;
 
                 Transform ct = new Transform();
                 ct.Position = new Vector3(0, 0, 0);
@@ -49,7 +48,7 @@ namespace RasterizationRender
                 DirectionLight directionLight = new DirectionLight();
                 directionLight.Direction = new Vector3(0, -1, 1);
                 directionLight.LightColor = Color.White;
-                directionLight.Intensity = 0.4f;
+                directionLight.Intensity = 0.3f;
                 mScene.AddLight(directionLight);
             }
             {
@@ -62,7 +61,8 @@ namespace RasterizationRender
             {
                 AmbientLight ambientLight = new AmbientLight();
                 ambientLight.LightColor = Color.White;
-                ambientLight.Intensity = 0.2f;
+                ambientLight.Intensity = 0.5f;
+                mScene.AddLight(ambientLight);
             }
 
             //以中心为原点，2x2大小立方体
@@ -109,27 +109,28 @@ namespace RasterizationRender
 
             Bitmap Texture = new Bitmap("./data/crate-texture.jpg");
 
-            Mesh m = new Mesh();
-            m.Verteics = vertices;
-            m.Trangles = triangles;
+            Mesh cubeMesh = new Mesh();
+            cubeMesh.Vertexes = vertices;
+            cubeMesh.Trangles = triangles;
             {
                 GameObject go = new GameObject();
-                go.Mesh = m;
+                go.Mesh = cubeMesh;
                 Transform t = new Transform();
-                t.Position = new Vector3(0, 0, 4);
+                t.Position = new Vector3(0, 0, 1);
                 t.Rotation = new Vector3(0, 0, 0);
-                t.Scale = new Vector3(1, 1, 1);
+                t.Scale = new Vector3(0.5f, 0.5f, 0.5f);
                 go.Transform = t;
                 Material material = new Material();
+                material.Texture = Texture;
                 go.Material = material;
                 mScene.AddObject(go);
             }
             {
                 GameObject go = new GameObject();
-                go.Mesh = m;
+                go.Mesh = cubeMesh;
                 Transform t = new Transform();
                 t.Position = new Vector3(-3, 2, 4);
-                t.Rotation = new Vector3(0, 0, 0);
+                t.Rotation = new Vector3(0, 1.1f, 0);
                 t.Scale = new Vector3(1, 1, 1);
                 go.Transform = t;
                 Material material = new Material();
@@ -140,29 +141,31 @@ namespace RasterizationRender
 
             {
                 GameObject go = new GameObject();
-                go.Mesh = m;
+                go.Mesh = cubeMesh;
                 Transform t = new Transform();
                 t.Position = new Vector3(2, 1, 6);
                 t.Rotation = new Vector3(0, 0, 0);
                 t.Scale = new Vector3(1, 1, 1);
                 go.Transform = t;
                 Material material = new Material();
+                material.Texture = Texture;
                 go.Material = material;
                 mScene.AddObject(go);
             }
 
-            {
-                GameObject go = new GameObject();
-                go.Mesh = m;
-                Transform t = new Transform();
-                t.Position = new Vector3(-4, -3, 5);
-                t.Rotation = new Vector3(0, 0, 0);
-                t.Scale = new Vector3(1, 1, 1);
-                go.Transform = t;
-                Material material = new Material();
-                go.Material = material;
-                mScene.AddObject(go);
-            }
+            //{
+            //    GameObject go = new GameObject();
+            //    go.Mesh = cubeMesh;
+            //    Transform t = new Transform();
+            //    t.Position = new Vector3(-4, -3, 5);
+            //    t.Rotation = new Vector3(2, 0, 0);
+            //    t.Scale = new Vector3(1, 1, 1);
+            //    go.Transform = t;
+            //    Material material = new Material();
+            //    material.Texture = Texture;
+            //    go.Material = material;
+            //    mScene.AddObject(go);
+            //}
 
             mScene.Render();
             Invalidate();

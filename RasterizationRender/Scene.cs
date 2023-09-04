@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Numerics;
+using System.Windows.Forms;
 
 namespace RasterizationRender
 {
@@ -52,15 +53,16 @@ namespace RasterizationRender
     }
     public class Mesh
     {
-        public List<Vector3> Verteics; //顶点
+        public List<Vector3> Vertexes; //局部顶点
         public List<Triangle> Trangles;//三角形
         public List<Vector3> Normals;//三角形的法线
 
+        public List<Vector3> ViewVertexes;//世界坐标顶点
         //所有顶点距离原点最近点和最远点为直径
         public BoundingSphare GetBoundingSphare()
         {
-            Vector3 near = Verteics[0], far = Verteics[0];
-            foreach (var v in Verteics)
+            Vector3 near = ViewVertexes[0], far = ViewVertexes[0];
+            foreach (var v in ViewVertexes)
             {
                 if (v.Length() < near.Length())
                 {
@@ -145,8 +147,8 @@ namespace RasterizationRender
 
         public Color GetColor(UV uv)
         {
-            int x = (int)(uv.u * Texture.Width);
-            int y = (int)(uv.v * Texture.Height);
+            int x = (int)(uv.u * (Texture.Width-1));
+            int y = (int)(uv.v * (Texture.Height-1));
             return Texture.GetPixel(x, y);
         }
     }
@@ -170,29 +172,22 @@ namespace RasterizationRender
             Height = h;
             Bitmap = new Bitmap(w, h);
         }
-
-        //近大远小
-        public Vector2 WorldToViewPort(Vector3 world)
+        public Vector2 ViewPortToScreen(Vector3 vp)
         {
-            return new Vector2(world.X / world.Z, world.Y / world.Z);
+            return NDCToScreen(ViewPortToNDC(vp));
+        }
+        //近大远小
+        public Vector2 ViewPortToNDC(Vector3 vp)
+        {
+            return new Vector2(vp.X / vp.Z, vp.Y / vp.Z);
         }
         //(-1,1) --> (0,w)
         //(-1,1) --> (0,h)
-        public Vector2 ViewPortToScreen(Vector2 viewport)
+        public Vector2 NDCToScreen(Vector2 ndc)
         {
-            return new Vector2((viewport.X + 1) / 2 * Width, (viewport.Y + 1) / 2 * Height);
+            return new Vector2((ndc.X + 1) / 2 * Width, (ndc.Y + 1) / 2 * Height);
         }
 
-        public Vector2 WorldToScreen(Vector3 world)
-        {
-            return ViewPortToScreen(WorldToViewPort(world));
-        }
-
-        //(0,w) --> (-1,1)
-        public Vector2 ScreenToViewPort(Vector2 screen)
-        {
-            return new Vector2(screen.X / Width * 2 - 1, screen.Y / Height * 2 - 1);
-        }
 
 
 
@@ -274,7 +269,7 @@ namespace RasterizationRender
             List<Color> colors = new List<Color>();
             foreach (var v in vertices)
             {
-                points.Add(WorldToScreen(v.WorldPos));
+                points.Add(ViewPortToScreen(v.WorldPos));
                 colors.Add(v.Color);
             }
 
@@ -344,7 +339,7 @@ namespace RasterizationRender
             List<Vector2> points = new List<Vector2>();
             foreach (var v in vertices)
             {
-                points.Add(WorldToScreen(v));
+                points.Add(ViewPortToScreen(v));
             }
 
             foreach (var t in triangles)
@@ -363,88 +358,65 @@ namespace RasterizationRender
     }
     public class Camera
     {
+        //左手坐标系（叉乘用左手法则），相机在原点，看向+z方向
         public float FieldOfView;//垂直方向的视野夹角 弧度
         public float AspactRatio;//宽高比 w/h
         public float ZNear;//近平面
         public float ZFar;//远平面
-
         public Transform Transform;
-
-        List<Plane> mPlanes = new List<Plane>();
-
+        public List<Plane> mPlanes = new List<Plane>();
+        public int Width;//屏幕宽度
+        public int Height;//屏幕高度
+        public float ViewW;//视口宽度
+        public float ViewH;//视口高度
         public void Init()
         {
             // 计算6个平面
             float n = ZNear;
             float f = ZFar;
-            float h = MathF.Tan(FieldOfView / 2) * ZNear;
-            float w = h * AspactRatio;
+            float h = MathF.Tan(FieldOfView / 2) * ZNear;//高度的一半
+            float w = h * AspactRatio; //宽度的一半
+
+            ViewW = w*2;
+            ViewH = h*2;
+
             Vector3 pTopLeft = new Vector3(-w, h, n);
             Vector3 pTopRight = new Vector3(w, h, n);
             Vector3 pBotLeft = new Vector3(-w, -h, n);
             Vector3 pBotRight = new Vector3(w, -h, n);
 
             //法线向内
-            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotLeft, pTopLeft)), 0));//left
-            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pTopRight, pBotRight)), 0));//right
-            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pTopLeft, pTopRight)), 0));//top
-            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotRight, pBotLeft)), 0));//bottom
+            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pTopLeft, pBotLeft)), 0));//left
+            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotRight, pTopRight )), 0));//right
+            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pTopRight, pTopLeft)), 0));//top
+            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotLeft, pBotRight)), 0));//bottom
             mPlanes.Add(new Plane(new Vector3(0, 0, 1), n));//near
             mPlanes.Add(new Plane(new Vector3(0, 0, -1), -f));//far
 
-        }
-        public GameObject ClipObject(GameObject go)
-        {
-            foreach (Plane p in mPlanes)
-            {
-                go = ClipByPlane(p, go);
-                if (go == null)
-                {
-                    return null;
-                }
-            }
-            return go;
-        }
 
-        GameObject ClipByPlane(Plane p, GameObject go)
-        {
-            var mesh = go.Mesh;
-            var bs = mesh.GetBoundingSphare();
-            float sd = SignedDistance(p, bs.Pos);
-            if (sd > bs.Radius)//视野内
-            {
-                return go;
-            }
-            if (sd < -bs.Radius)//视野外
-            {
-                return null;
-            }
-            //todo 相交
-            return go;
-        }
 
-        //平面上的点和平面法线点乘得到的投影距离都等于D
-        //点v在plane法线的投影距离-plane的距离=相对距离
-        float SignedDistance(Plane p, Vector3 v)
-        {
-            return v.X * p.Normal.X + v.Y * p.Normal.Y + v.Z * p.Normal.Z - p.D;
         }
-
         //相机视口投影到屏幕空间
         public Vector2 ViewPort2Canvas(Vector3 v)
         {
             //近大远小
             Vector2 pt = new Vector2(v.X * ZNear / v.Z, v.Y * ZNear / v.Z);
+            pt.X = pt.X / ViewW * Width;
+            pt.Y = pt.Y / ViewH * Height;
+
             return pt;
         }
 
         //屏幕坐标转视口坐标
-        public Vector3 Canvas2ViewPort(Vector2 v, float iz)
+        public Vector3 Canvas2ViewPort(Vector2 pt, float iz)
         {
             float z = 1 / iz;
-            float x = v.X * z / ZNear;
-            float y = v.Y * z / ZNear;
-            return new Vector3(x, y, z);
+            float x = pt.X * z / ZNear;
+            float y = pt.Y * z / ZNear;
+            Vector3 v = new Vector3(x, y, z);
+            v.X = v.X * ViewW / Width;
+            v.Y = v.Y * ViewH / Height;
+            return v;
         }
     }
 
@@ -475,66 +447,96 @@ namespace RasterizationRender
         List<GameObject> mObjects = new List<GameObject>();
         //摄像机
         Camera mCamera;
-        //屏幕
-        Canvas mCanvas;
+
         //深度缓存
         float[] mZBuffer;
+        public Bitmap FrameBuffer;
 
-        public void AddCanvase(Canvas canvas) { mCanvas = canvas; mZBuffer = new float[(int)canvas.Width * (int)canvas.Height]; }
-        public void AddCamera(Camera cam) { mCamera = cam; }
+        public void AddCamera(Camera cam) { 
+            mCamera = cam;
+            mZBuffer = new float[mCamera.Width * mCamera.Height];
+            FrameBuffer = new Bitmap(mCamera.Width, mCamera.Height);
+        }
         public void AddObject(GameObject obj) { mObjects.Add(obj); }
         public void AddLight(Light light) { mLights.Add(light); }
 
         //渲染物体
         public void Render()
         {
-            //相机裁剪
-            List<GameObject> clipObjects = new List<GameObject>();
             foreach (GameObject go in mObjects)
-            {
-                GameObject co = mCamera.ClipObject(go);
-                if (co != null)
-                {
-                    clipObjects.Add(co);
-                }
-            }
-
-            foreach (GameObject go in clipObjects)
             {
                 RenderObject(go);
             }
         }
-
-
 
         void RenderObject(GameObject go)
         {
             //MV变换
             if (go.Mesh != null)
             {
-                Transform t = go.Transform;
+                Transform gt = go.Transform;
                 Transform ct = mCamera.Transform;
-                Matrix4x4 model = t.MakeTranslationMatrix() * t.MakeYRotationMatrix() * t.MakeScaleMatrix();
+                Matrix4x4 model = gt.MakeTranslationMatrix() * gt.MakeYRotationMatrix() * gt.MakeScaleMatrix();
                 //旋转矩阵转置就是反向旋转
                 //平移向量求反构造反向平移矩阵
                 Matrix4x4 view = Matrix4x4.CreateTranslation(-ct.Position) * Matrix4x4.Transpose(ct.MakeYRotationMatrix());
-                List<Vector3> vertics = new List<Vector3>();
-                foreach (var v in go.Mesh.Verteics)
+                Matrix4x4 vm = view * model;
+                List<Vector3> vs = new List<Vector3>();
+                foreach (var v in go.Mesh.Vertexes)
                 {
-                    Vector4 v4 = new Vector4(v, 1);
-                    Vector4 vt = Multiply(view * model, v4);
+                    Vector4 vt = Multiply(vm, new Vector4(v, 1));
                     Vector3 v3 = new Vector3(vt.X, vt.Y, vt.Z);
-                    vertics.Add(v3);
+                    vs.Add(v3);
                 }
-
-                RenderTriangles(vertics, go.Mesh.Trangles, go);
+                go.Mesh.ViewVertexes = vs;
+                go = ClipObject(go,vm);
+                if (go == null)
+                {
+                    return;
+                }
+                RenderTriangles(vs, go.Mesh.Trangles, go);
             }
         }
+        public GameObject ClipObject(GameObject go, Matrix4x4 vm)
+        {
+            var mesh = go.Mesh;
+            var bs = mesh.GetBoundingSphare();
+            foreach (Plane p in mCamera.mPlanes)
+            {
+                if (ClipByPlane(p, bs))
+                {
+                    return null;
+                }
+            }
+            return go;
+        }
+
+        //返回true表示被裁掉了
+        bool ClipByPlane(Plane p, BoundingSphare bs)
+        {
+            float sd = SignedDistance(p, bs.Pos);
+            if (sd > bs.Radius)//视野内
+            {
+                return false;
+            }
+            if (sd < -bs.Radius)//视野外
+            {
+                return true;
+            }
+            //todo 相交
+            return false;
+        }
+
+        //平面上的点和平面法线点乘得到的投影距离都等于D
+        //点v在plane法线的投影距离-plane的距离=相对距离
+        float SignedDistance(Plane p, Vector3 v)
+        {
+            return v.X * p.Normal.X + v.Y * p.Normal.Y + v.Z * p.Normal.Z - p.D;
+        }
+
 
         void RenderTriangles(List<Vector3> vertics, List<Triangle> triangles, GameObject go)
         {
-
-
             //视口顶点投影到屏幕
             List<Vector2> projected = new List<Vector2>();
             foreach (Vector3 v in vertics)
@@ -556,13 +558,12 @@ namespace RasterizationRender
             Vector3 v01 = vertics[triangle.index[1]] - vertics[triangle.index[0]];
             Vector3 v12 = vertics[triangle.index[2]] - vertics[triangle.index[1]];
             Vector3 tri_normal = Vector3.Cross(v01, v12);
-            if (Vector3.Dot(tri_center, tri_normal) < 0)
+            if (Vector3.Dot(tri_center, tri_normal) > 0)
             {
                 return;
             }
 
-            int[] indexes = new int[3] { 0, 1, 2 };
-            SortVertexIndexes(indexes, projected);
+            int[] indexes = SortVertexIndexes(triangle.index, projected);
 
             (int i0, int i1, int i2) = (indexes[0], indexes[1], indexes[2]);
             var (v0, v1, v2) = (vertics[triangle.index[i0]], vertics[triangle.index[i1]], vertics[triangle.index[i2]]);
@@ -574,9 +575,9 @@ namespace RasterizationRender
             var iz_list = EdgeInterpolate(p0.Y, 1 / v0.Z, p1.Y, 1 / v1.Z, p2.Y, 1 / v2.Z);
             var (iz012, iz02) = (iz_list[0], iz_list[1]);
             //对uv插值
-            var u_list = EdgeInterpolate(p0.Y, triangle.uv[i0].u, p1.Y, triangle.uv[i1].u, p2.Y, triangle.uv[i2].u);
+            var u_list = EdgeInterpolate(p0.Y, triangle.uv[i0].u/v0.Z, p1.Y, triangle.uv[i1].u/v1.Z, p2.Y, triangle.uv[i2].u/v2.Z);
             var (u012, u02) = (u_list[0], u_list[1]);
-            var v_list = EdgeInterpolate(p0.Y, triangle.uv[i0].v, p1.Y, triangle.uv[i1].v, p2.Y, triangle.uv[i2].v);
+            var v_list = EdgeInterpolate(p0.Y, triangle.uv[i0].v/v0.Z, p1.Y, triangle.uv[i1].v/v1.Z, p2.Y, triangle.uv[i2].v/v2.Z);
             var (v012, v02) = (v_list[0], v_list[1]);
             //顶点法线变换，法线没有缩放平移，只有model->world->view 两次旋转
             var rotate = Matrix4x4.Transpose(mCamera.Transform.MakeYRotationMatrix()) * go.Transform.MakeYRotationMatrix();
@@ -604,10 +605,9 @@ namespace RasterizationRender
             }
 
             //光栅化&着色
-            for (int y = (int)p0.Y; y <= p2.Y; y++)
+            for (int i=0;i<izL.Count;i++)
             {
-                int i = y - (int)p0.Y;
-
+                int y = (int)p0.Y + i;
                 var izscan = Interpolate(xL[i], izL[i], xR[i], izR[i]);
                 var nxscan = Interpolate(xL[i], nxL[i], xR[i], nxR[i]);
                 var nyscan = Interpolate(xL[i], nyL[i], xR[i], nyR[i]);
@@ -616,23 +616,25 @@ namespace RasterizationRender
                 var vscan = Interpolate(xL[i], vL[i], xR[i], vR[i]);
 
                 //渲染像素点x,y
-                for (int x = (int)xL[i]; x <= xR[i]; x++)
+                for (int j=0;j<izscan.Count;j++)
                 {
-                    int j = x - (int)xL[i];
+                    int x = (int)xL[i] + j;
                     float inv_z = izscan[j];
-                    if (UpdateDepthBuffer(i, j, inv_z))
+                    if (UpdateDepthBuffer(x,y, inv_z))
                     {
-                        Vector3 vertex = mCamera.Canvas2ViewPort(new Vector2(i, j), inv_z);
+                        Vector3 vertex = mCamera.Canvas2ViewPort(new Vector2(x,y), inv_z);
                         Vector3 normal = Vector3.Normalize(new Vector3(nxscan[j], nyscan[j], nzscan[j]));
                         float intensity = ComputeIllumination(vertex, normal);
 
-                        float u = uscan[j] / izscan[j];
-                        float v = vscan[j] / izscan[j];
+                        float u = uscan[j]/ izscan[j];
+                        float v = vscan[j]/ izscan[j];
 
                         Color color = go.Material.GetColor(new UV(u, v));
                         Vector3 vc = new Vector3(color.R, color.G, color.B) * intensity;
                         color = Color.FromArgb((int)vc.X, (int)vc.Y, (int)vc.Z);
-                        mCanvas.Bitmap.SetPixel(x, y, color);
+                        
+                        
+                        FrameBuffer.SetPixel(x, y, color);
                     }
                 }
             }
@@ -669,25 +671,31 @@ namespace RasterizationRender
 
                 //diffuse
                 float diffuse = L.Intensity * Vector3.Dot(vL, normal);
-                illumination += diffuse;
+                if (diffuse > 0)
+                {
+                    illumination += diffuse;
+                }
                 //specular
                 Vector3 view = -vertex;
                 Vector3 half = Vector3.Normalize(vL + view);
                 float specular = L.Intensity * MathF.Pow(Vector3.Dot(half, normal), 64);
-                illumination += specular;
+                if (specular > 0)
+                {
+                    illumination += specular;
+                }
 
             }
             return illumination;
         }
         bool UpdateDepthBuffer(int x, int y, float iz)
         {
-            int ix = (int)mCanvas.Width / 2 + x;
-            int iy = (int)mCanvas.Height / 2 + y;
-            if (ix < 0 || ix > mCanvas.Width || iy < 0 || iy > mCanvas.Height)
+            int ix = (int)mCamera.Width / 2 + x;
+            int iy = (int)mCamera.Height / 2 + y;
+            if (ix < 0 || ix >= mCamera.Width || iy < 0 || iy >= mCamera.Height)
             {
                 return false;
             }
-            int i = ix + iy * (int)mCanvas.Width;
+            int i = ix + iy * (int)mCamera.Width;
             if (iz > mZBuffer[i])
             {
                 mZBuffer[i] = iz;
@@ -696,11 +704,13 @@ namespace RasterizationRender
             return false;
         }
         //顶点按y方向排序
-        void SortVertexIndexes(int[] indexes, List<Vector2> projected)
+        int[] SortVertexIndexes(int[] vindex, List<Vector2> projected)
         {
-            if (projected[indexes[1]].Y < projected[indexes[0]].Y) { int swap = indexes[0]; indexes[0] = indexes[1]; indexes[1] = swap; }
-            if (projected[indexes[2]].Y < projected[indexes[0]].Y) { int swap = indexes[0]; indexes[0] = indexes[2]; indexes[2] = swap; }
-            if (projected[indexes[2]].Y < projected[indexes[1]].Y) { int swap = indexes[1]; indexes[1] = indexes[2]; indexes[2] = swap; }
+            int[] indexes = new[] { 0, 1, 2 };
+            if (projected[vindex[indexes[1]]].Y < projected[vindex[indexes[0]]].Y) { int swap = indexes[0]; indexes[0] = indexes[1]; indexes[1] = swap; }
+            if (projected[vindex[indexes[2]]].Y < projected[vindex[indexes[0]]].Y) { int swap = indexes[0]; indexes[0] = indexes[2]; indexes[2] = swap; }
+            if (projected[vindex[indexes[2]]].Y < projected[vindex[indexes[1]]].Y) { int swap = indexes[1]; indexes[1] = indexes[2]; indexes[2] = swap; }
+            return indexes;
         }
 
         Vector4 Multiply(Matrix4x4 m4, Vector4 v4)
@@ -733,8 +743,10 @@ namespace RasterizationRender
             var v01 = Interpolate(y0, v0, y1, v1);
             var v12 = Interpolate(y1, v1, y2, v2);
             var v02 = Interpolate(y0, v0, y2, v2);
-
-            v01.RemoveAt(v01.Count - 1);
+            if(v01.Count+v12.Count>v02.Count)
+            {
+                v01.RemoveAt(v01.Count - 1);
+            }
             v01.AddRange(v12);
 
             return new List<List<float>>() { v01, v02 };
