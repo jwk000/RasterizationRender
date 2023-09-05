@@ -12,7 +12,7 @@ namespace RasterizationRender
 
     public class Vertex
     {
-        public Vector3 WorldPos;
+        public Vector3 Pos;
         public Color Color;
     }
 
@@ -279,7 +279,7 @@ namespace RasterizationRender
             List<Color> colors = new List<Color>();
             foreach (var v in vertices)
             {
-                points.Add(ViewPortToScreen(v.WorldPos));
+                points.Add(ViewPortToScreen(v.Pos));
                 colors.Add(v.Color);
             }
 
@@ -449,6 +449,55 @@ namespace RasterizationRender
         public Vector3 Direction;
     }
 
+    class MathHelper
+    {
+        public static Vector4 Multiply(Matrix4x4 m4, Vector4 v4)
+        {
+            return new Vector4(
+                m4.M11 * v4.X + m4.M12 * v4.Y + m4.M13 * v4.Z + m4.M14 * v4.W,
+                m4.M21 * v4.X + m4.M22 * v4.Y + m4.M23 * v4.Z + m4.M24 * v4.W,
+                m4.M31 * v4.X + m4.M32 * v4.Y + m4.M33 * v4.Z + m4.M34 * v4.W,
+                m4.M41 * v4.X + m4.M42 * v4.Y + m4.M43 * v4.Z + m4.M44 * v4.W
+                );
+        }
+
+        public static List<float> Interpolate(float i0, float d0, float i1, float d1)
+        {
+            List<float> res = new List<float>();
+            float d = d0;
+            res.Add(d);
+            if (i0 == i1) return res;
+            float a = (d1 - d0) / (i1 - i0);
+            for (float i = i0 + 1; i <= i1; i++)
+            {
+                d = d + a;
+                res.Add(d);
+            }
+            return res;
+        }
+
+        public static List<List<float>> EdgeInterpolate(float y0, float v0, float y1, float v1, float y2, float v2)
+        {
+            var v01 = Interpolate(y0, v0, y1, v1);
+            var v12 = Interpolate(y1, v1, y2, v2);
+            var v02 = Interpolate(y0, v0, y2, v2);
+            if (v01.Count + v12.Count > v02.Count)
+            {
+                v02.Add(v02.Last());
+            }
+            v01.AddRange(v12);
+
+            return new List<List<float>>() { v01, v02 };
+        }
+
+        public static float Clamp01(float x)
+        {
+            if (x < 0) return 0;
+            if (x > 1) return 1;
+            return x;
+        }
+    }
+
     public class Scene
     {
         //光源
@@ -462,10 +511,7 @@ namespace RasterizationRender
         float[] mZBuffer;
         public Bitmap FrameBuffer;
 
-        public void AddCamera(Camera cam)
-        {
-            mCamera = cam;
-        }
+        public void AddCamera(Camera cam) { mCamera = cam; }
         public void AddObject(GameObject obj) { mObjects.Add(obj); }
         public void AddLight(Light light) { mLights.Add(light); }
 
@@ -491,30 +537,27 @@ namespace RasterizationRender
         void RenderObject(GameObject go)
         {
             //MV变换
-            if (go.Mesh != null)
+            Transform gt = go.Transform;
+            Transform ct = mCamera.Transform;
+            Matrix4x4 model = gt.MakeTranslationMatrix() * gt.MakeXRotationMatrix() * gt.MakeYRotationMatrix() * gt.MakeScaleMatrix();
+            //旋转矩阵转置就是反向旋转
+            //平移向量求反构造反向平移矩阵
+            Matrix4x4 view = Matrix4x4.Transpose(ct.MakeXRotationMatrix() * ct.MakeYRotationMatrix()) * Matrix4x4.CreateTranslation(-ct.Position);
+            Matrix4x4 vm = view * model;
+            List<Vector3> vs = new List<Vector3>();
+            foreach (var v in go.Mesh.Vertexes)
             {
-                Transform gt = go.Transform;
-                Transform ct = mCamera.Transform;
-                Matrix4x4 model = gt.MakeTranslationMatrix() * gt.MakeXRotationMatrix() * gt.MakeYRotationMatrix() * gt.MakeScaleMatrix();
-                //旋转矩阵转置就是反向旋转
-                //平移向量求反构造反向平移矩阵
-                Matrix4x4 view = Matrix4x4.Transpose(ct.MakeXRotationMatrix() * ct.MakeYRotationMatrix()) * Matrix4x4.CreateTranslation(-ct.Position);
-                Matrix4x4 vm = view * model;
-                List<Vector3> vs = new List<Vector3>();
-                foreach (var v in go.Mesh.Vertexes)
-                {
-                    Vector4 vt = Multiply(vm, new Vector4(v, 1));
-                    Vector3 v3 = new Vector3(vt.X, vt.Y, vt.Z);
-                    vs.Add(v3);
-                }
-                go.Mesh.ViewVertexes = vs;
-                go = ClipObject(go, vm);
-                if (go == null)
-                {
-                    return;
-                }
-                RenderTriangles(vs, go.Mesh.Trangles, go);
+                Vector4 vt = MathHelper.Multiply(vm, new Vector4(v, 1));
+                Vector3 v3 = new Vector3(vt.X, vt.Y, vt.Z);
+                vs.Add(v3);
             }
+            go.Mesh.ViewVertexes = vs;
+            go = ClipObject(go, vm);
+            if (go == null)
+            {
+                return;
+            }
+            RenderTriangles(vs, go.Mesh.Trangles, go);
         }
         public GameObject ClipObject(GameObject go, Matrix4x4 vm)
         {
@@ -553,7 +596,6 @@ namespace RasterizationRender
             return v.X * p.Normal.X + v.Y * p.Normal.Y + v.Z * p.Normal.Z - p.D;
         }
 
-
         void RenderTriangles(List<Vector3> vertics, List<Triangle> triangles, GameObject go)
         {
             //视口顶点投影到屏幕
@@ -588,30 +630,30 @@ namespace RasterizationRender
             var (v0, v1, v2) = (vertics[triangle.index[i0]], vertics[triangle.index[i1]], vertics[triangle.index[i2]]);
             var (p0, p1, p2) = (projected[triangle.index[i0]], projected[triangle.index[i1]], projected[triangle.index[i2]]);
             //对x插值
-            var x_list = EdgeInterpolate(p0.Y, p0.X, p1.Y, p1.X, p2.Y, p2.X);
+            var x_list = MathHelper.EdgeInterpolate(p0.Y, p0.X, p1.Y, p1.X, p2.Y, p2.X);
             var (x012, x02) = (x_list[0], x_list[1]);
             //对1/z插值
-            var iz_list = EdgeInterpolate(p0.Y, 1 / v0.Z, p1.Y, 1 / v1.Z, p2.Y, 1 / v2.Z);
+            var iz_list = MathHelper.EdgeInterpolate(p0.Y, 1 / v0.Z, p1.Y, 1 / v1.Z, p2.Y, 1 / v2.Z);
             var (iz012, iz02) = (iz_list[0], iz_list[1]);
             //对uv插值
-            var u_list = EdgeInterpolate(p0.Y, triangle.uv[i0].u / v0.Z, p1.Y, triangle.uv[i1].u / v1.Z, p2.Y, triangle.uv[i2].u / v2.Z);
+            var u_list = MathHelper.EdgeInterpolate(p0.Y, triangle.uv[i0].u / v0.Z, p1.Y, triangle.uv[i1].u / v1.Z, p2.Y, triangle.uv[i2].u / v2.Z);
             var (u012, u02) = (u_list[0], u_list[1]);
-            var v_list = EdgeInterpolate(p0.Y, triangle.uv[i0].v / v0.Z, p1.Y, triangle.uv[i1].v / v1.Z, p2.Y, triangle.uv[i2].v / v2.Z);
+            var v_list = MathHelper.EdgeInterpolate(p0.Y, triangle.uv[i0].v / v0.Z, p1.Y, triangle.uv[i1].v / v1.Z, p2.Y, triangle.uv[i2].v / v2.Z);
             var (v012, v02) = (v_list[0], v_list[1]);
             //顶点法线变换，法线没有缩放平移，只有model->world->view 两次旋转
             var rotate = Matrix4x4.Transpose(mCamera.Transform.MakeXRotationMatrix() * mCamera.Transform.MakeYRotationMatrix())
                 * go.Transform.MakeXRotationMatrix() * go.Transform.MakeYRotationMatrix();
-            var n0 = Multiply(rotate, new Vector4(triangle.normal[i0], 1));
-            var n1 = Multiply(rotate, new Vector4(triangle.normal[i1], 1));
-            var n2 = Multiply(rotate, new Vector4(triangle.normal[i2], 1));
+            var n0 = MathHelper.Multiply(rotate, new Vector4(triangle.normal[i0], 1));
+            var n1 = MathHelper.Multiply(rotate, new Vector4(triangle.normal[i1], 1));
+            var n2 = MathHelper.Multiply(rotate, new Vector4(triangle.normal[i2], 1));
 
             //phong shading model
             //法线插值
-            var nx_list = EdgeInterpolate(p0.Y, n0.X, p1.Y, n1.X, p2.Y, n2.X);
+            var nx_list = MathHelper.EdgeInterpolate(p0.Y, n0.X, p1.Y, n1.X, p2.Y, n2.X);
             var (nx012, nx02) = (nx_list[0], nx_list[1]);
-            var ny_list = EdgeInterpolate(p0.Y, n0.Y, p1.Y, n1.Y, p2.Y, n2.Y);
+            var ny_list = MathHelper.EdgeInterpolate(p0.Y, n0.Y, p1.Y, n1.Y, p2.Y, n2.Y);
             var (ny012, ny02) = (ny_list[0], ny_list[1]);
-            var nz_list = EdgeInterpolate(p0.Y, n0.Z, p1.Y, n1.Z, p2.Y, n2.Z);
+            var nz_list = MathHelper.EdgeInterpolate(p0.Y, n0.Z, p1.Y, n1.Z, p2.Y, n2.Z);
             var (nz012, nz02) = (nz_list[0], nz_list[1]);
 
             //判断左和右
@@ -628,12 +670,12 @@ namespace RasterizationRender
             for (int i = 0; i < xL.Count; i++)
             {
                 int y = (int)p0.Y + i;
-                var izscan = Interpolate(xL[i], izL[i], xR[i], izR[i]);
-                var nxscan = Interpolate(xL[i], nxL[i], xR[i], nxR[i]);
-                var nyscan = Interpolate(xL[i], nyL[i], xR[i], nyR[i]);
-                var nzscan = Interpolate(xL[i], nzL[i], xR[i], nzR[i]);
-                var uscan = Interpolate(xL[i], uL[i], xR[i], uR[i]);
-                var vscan = Interpolate(xL[i], vL[i], xR[i], vR[i]);
+                var izscan = MathHelper.Interpolate(xL[i], izL[i], xR[i], izR[i]);
+                var nxscan = MathHelper.Interpolate(xL[i], nxL[i], xR[i], nxR[i]);
+                var nyscan = MathHelper.Interpolate(xL[i], nyL[i], xR[i], nyR[i]);
+                var nzscan = MathHelper.Interpolate(xL[i], nzL[i], xR[i], nzR[i]);
+                var uscan = MathHelper.Interpolate(xL[i], uL[i], xR[i], uR[i]);
+                var vscan = MathHelper.Interpolate(xL[i], vL[i], xR[i], vR[i]);
 
                 //渲染像素点x,y
                 for (int j = 0; j < izscan.Count; j++)
@@ -648,16 +690,12 @@ namespace RasterizationRender
 
                         float u = uscan[j] / izscan[j];
                         float v = vscan[j] / izscan[j];
-                        u = Clamp01(u);
-                        v = Clamp01(v);
+                        u = MathHelper.Clamp01(u);
+                        v = MathHelper.Clamp01(v);
                         Color color = go.Material.GetColor(new UV(u, v));
                         Vector3 vc = new Vector3(color.R, color.G, color.B) * intensity;
                         color = Color.FromArgb((int)vc.X, (int)vc.Y, (int)vc.Z);
 
-                        if (color == Color.White)
-                        {
-                            break;
-                        }
                         FrameBuffer.SetPixel(x + mCamera.Width / 2, y + mCamera.Height / 2, color);
                     }
                 }
@@ -680,14 +718,14 @@ namespace RasterizationRender
                 if (L is DirectionLight)
                 {
                     var dL = (DirectionLight)L;
-                    var dir = Multiply(Matrix4x4.Transpose(mCamera.Transform.MakeYRotationMatrix()), new Vector4(dL.Direction, 1));
+                    var dir = MathHelper.Multiply(Matrix4x4.Transpose(mCamera.Transform.MakeYRotationMatrix()), new Vector4(dL.Direction, 1));
                     vL = Vector3.Normalize(new Vector3(dir.X, dir.Y, dir.Z));
                 }
                 else if (L is PointLight)
                 {
                     var pL = (PointLight)L;
                     var camMatrix = Matrix4x4.Transpose(mCamera.Transform.MakeYRotationMatrix()) * Matrix4x4.CreateTranslation(-mCamera.Transform.Position);
-                    var pos = Multiply(camMatrix, new Vector4(pL.Position, 1));
+                    var pos = MathHelper.Multiply(camMatrix, new Vector4(pL.Position, 1));
                     Vector3 posL = new Vector3(pos.X, pos.Y, pos.Z);
                     vL = Vector3.Normalize(posL - vertex);
                 }
@@ -737,50 +775,5 @@ namespace RasterizationRender
             return indexes;
         }
 
-        Vector4 Multiply(Matrix4x4 m4, Vector4 v4)
-        {
-            return new Vector4(
-                m4.M11 * v4.X + m4.M12 * v4.Y + m4.M13 * v4.Z + m4.M14 * v4.W,
-                m4.M21 * v4.X + m4.M22 * v4.Y + m4.M23 * v4.Z + m4.M24 * v4.W,
-                m4.M31 * v4.X + m4.M32 * v4.Y + m4.M33 * v4.Z + m4.M34 * v4.W,
-                m4.M41 * v4.X + m4.M42 * v4.Y + m4.M43 * v4.Z + m4.M44 * v4.W
-                );
-        }
-
-        List<float> Interpolate(float i0, float d0, float i1, float d1)
-        {
-            List<float> res = new List<float>();
-            float d = d0;
-            res.Add(d);
-            if (i0 == i1) return res;
-            float a = (d1 - d0) / (i1 - i0);
-            for (float i = i0 + 1; i <= i1; i++)
-            {
-                d = d + a;
-                res.Add(d);
-            }
-            return res;
-        }
-
-        List<List<float>> EdgeInterpolate(float y0, float v0, float y1, float v1, float y2, float v2)
-        {
-            var v01 = Interpolate(y0, v0, y1, v1);
-            var v12 = Interpolate(y1, v1, y2, v2);
-            var v02 = Interpolate(y0, v0, y2, v2);
-            if (v01.Count + v12.Count > v02.Count)
-            {
-                v02.Add(v02.Last());
-            }
-            v01.AddRange(v12);
-
-            return new List<List<float>>() { v01, v02 };
-        }
-
-        float Clamp01(float x)
-        {
-            if (x < 0) return 0;
-            if (x > 1) return 1;
-            return x;
-        }
     }
 }
