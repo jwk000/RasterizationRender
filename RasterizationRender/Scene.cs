@@ -90,6 +90,7 @@ namespace RasterizationRender
 
         public Matrix4x4 MakeTranslationMatrix()
         {
+            //return Matrix4x4.CreateTranslation(Position);
             return new Matrix4x4(
                 1, 0, 0, Position.X,
                 0, 1, 0, Position.Y,
@@ -99,43 +100,47 @@ namespace RasterizationRender
 
         public Matrix4x4 MakeXRotationMatrix()
         {
-            float cos = MathF.Cos(Rotation.X * MathF.PI / 180);
-            float sin = MathF.Sin(Rotation.X * MathF.PI / 180);
-            return new Matrix4x4(
-                1, 0, 0, 0,
-                0, cos, sin, 0,
-                0, sin, cos, 0,
-                0, 0, 0, 1);
+            return Matrix4x4.CreateRotationX(Rotation.X * MathF.PI / 180);
+            //float cos = MathF.Cos(Rotation.X * MathF.PI / 180);
+            //float sin = MathF.Sin(Rotation.X * MathF.PI / 180);
+            //return new Matrix4x4(
+            //    1, 0, 0, 0,
+            //    0, cos, sin, 0,
+            //    0, sin, cos, 0,
+            //    0, 0, 0, 1);
         }
 
         public Matrix4x4 MakeYRotationMatrix()
         {
-            float cos = MathF.Cos(Rotation.Y * MathF.PI / 180);
-            float sin = MathF.Sin(Rotation.Y * MathF.PI / 180);
-            return new Matrix4x4(
-                cos, 0, sin, 0,
-                0, 1, 0, 0,
-                -sin, 0, cos, 0,
-                0, 0, 0, 1);
+            return Matrix4x4.CreateRotationY(Rotation.Y * MathF.PI / 180);
+            //float cos = MathF.Cos(Rotation.Y * MathF.PI / 180);
+            //float sin = MathF.Sin(Rotation.Y * MathF.PI / 180);
+            //return new Matrix4x4(
+            //    cos, 0, sin, 0,
+            //    0, 1, 0, 0,
+            //    -sin, 0, cos, 0,
+            //    0, 0, 0, 1);
         }
 
         public Matrix4x4 MakeZRotationMatrix()
         {
-            float cos = MathF.Cos(Rotation.Z * MathF.PI / 180);
-            float sin = MathF.Sin(Rotation.Z * MathF.PI / 180);
-            return new Matrix4x4(
-                 cos, -sin, 0, 0,
-               sin, cos, 0, 0,
-                0, 0, 1, 0,
-                0, 0, 0, 1);
+            return Matrix4x4.CreateRotationZ(Rotation.Z * MathF.PI / 180);
+            //float cos = MathF.Cos(Rotation.Z * MathF.PI / 180);
+            //float sin = MathF.Sin(Rotation.Z * MathF.PI / 180);
+            //return new Matrix4x4(
+            //     cos, -sin, 0, 0,
+            //   sin, cos, 0, 0,
+            //    0, 0, 1, 0,
+            //    0, 0, 0, 1);
         }
 
         public Matrix4x4 MakeScaleMatrix()
         {
+            //return Matrix4x4.CreateScale(Scale);
             return new Matrix4x4(
-                Scale.X, 0, 0, 1,
-                0, Scale.Y, 0, 1,
-                0, 0, Scale.Z, 1,
+                Scale.X, 0, 0, 0,
+                0, Scale.Y, 0, 0,
+                0, 0, Scale.Z, 0,
                 0, 0, 0, 1);
         }
     }
@@ -147,8 +152,8 @@ namespace RasterizationRender
 
         public Color GetColor(UV uv)
         {
-            int x = (int)(uv.u * (Texture.Width-1));
-            int y = (int)(uv.v * (Texture.Height-1));
+            int x = (int)(uv.u * (Texture.Width - 1));
+            int y = (int)(uv.v * (Texture.Height - 1));
             return Texture.GetPixel(x, y);
         }
     }
@@ -158,6 +163,11 @@ namespace RasterizationRender
         public Mesh Mesh;
         public Material Material;
         public Transform Transform;
+        public Action<float> OnTick;
+        public void Update(float ts)
+        {
+            OnTick?.Invoke(ts);
+        }
     }
 
     public class Canvas
@@ -377,8 +387,8 @@ namespace RasterizationRender
             float h = MathF.Tan(FieldOfView / 2) * ZNear;//高度的一半
             float w = h * AspactRatio; //宽度的一半
 
-            ViewW = w*2;
-            ViewH = h*2;
+            ViewW = w * 2;
+            ViewH = h * 2;
 
             Vector3 pTopLeft = new Vector3(-w, h, n);
             Vector3 pTopRight = new Vector3(w, h, n);
@@ -387,7 +397,7 @@ namespace RasterizationRender
 
             //法线向内
             mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pTopLeft, pBotLeft)), 0));//left
-            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotRight, pTopRight )), 0));//right
+            mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotRight, pTopRight)), 0));//right
             mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pTopRight, pTopLeft)), 0));//top
             mPlanes.Add(new Plane(Vector3.Normalize(Vector3.Cross(pBotLeft, pBotRight)), 0));//bottom
             mPlanes.Add(new Plane(new Vector3(0, 0, 1), n));//near
@@ -452,17 +462,26 @@ namespace RasterizationRender
         float[] mZBuffer;
         public Bitmap FrameBuffer;
 
-        public void AddCamera(Camera cam) { 
+        public void AddCamera(Camera cam)
+        {
             mCamera = cam;
-            mZBuffer = new float[mCamera.Width * mCamera.Height];
-            FrameBuffer = new Bitmap(mCamera.Width, mCamera.Height);
         }
         public void AddObject(GameObject obj) { mObjects.Add(obj); }
         public void AddLight(Light light) { mLights.Add(light); }
 
+        public void Update(float ts)
+        {
+            foreach (var go in mObjects)
+            {
+                go.Update(ts);
+            }
+        }
+
         //渲染物体
         public void Render()
         {
+            mZBuffer = new float[mCamera.Width * mCamera.Height];
+            FrameBuffer = new Bitmap(mCamera.Width, mCamera.Height);
             foreach (GameObject go in mObjects)
             {
                 RenderObject(go);
@@ -476,10 +495,10 @@ namespace RasterizationRender
             {
                 Transform gt = go.Transform;
                 Transform ct = mCamera.Transform;
-                Matrix4x4 model = gt.MakeTranslationMatrix() * gt.MakeYRotationMatrix() * gt.MakeScaleMatrix();
+                Matrix4x4 model = gt.MakeTranslationMatrix() * gt.MakeXRotationMatrix() * gt.MakeYRotationMatrix() * gt.MakeScaleMatrix();
                 //旋转矩阵转置就是反向旋转
                 //平移向量求反构造反向平移矩阵
-                Matrix4x4 view = Matrix4x4.CreateTranslation(-ct.Position) * Matrix4x4.Transpose(ct.MakeYRotationMatrix());
+                Matrix4x4 view = Matrix4x4.Transpose(ct.MakeXRotationMatrix() * ct.MakeYRotationMatrix()) * Matrix4x4.CreateTranslation(-ct.Position);
                 Matrix4x4 vm = view * model;
                 List<Vector3> vs = new List<Vector3>();
                 foreach (var v in go.Mesh.Vertexes)
@@ -489,7 +508,7 @@ namespace RasterizationRender
                     vs.Add(v3);
                 }
                 go.Mesh.ViewVertexes = vs;
-                go = ClipObject(go,vm);
+                go = ClipObject(go, vm);
                 if (go == null)
                 {
                     return;
@@ -575,12 +594,13 @@ namespace RasterizationRender
             var iz_list = EdgeInterpolate(p0.Y, 1 / v0.Z, p1.Y, 1 / v1.Z, p2.Y, 1 / v2.Z);
             var (iz012, iz02) = (iz_list[0], iz_list[1]);
             //对uv插值
-            var u_list = EdgeInterpolate(p0.Y, triangle.uv[i0].u/v0.Z, p1.Y, triangle.uv[i1].u/v1.Z, p2.Y, triangle.uv[i2].u/v2.Z);
+            var u_list = EdgeInterpolate(p0.Y, triangle.uv[i0].u / v0.Z, p1.Y, triangle.uv[i1].u / v1.Z, p2.Y, triangle.uv[i2].u / v2.Z);
             var (u012, u02) = (u_list[0], u_list[1]);
-            var v_list = EdgeInterpolate(p0.Y, triangle.uv[i0].v/v0.Z, p1.Y, triangle.uv[i1].v/v1.Z, p2.Y, triangle.uv[i2].v/v2.Z);
+            var v_list = EdgeInterpolate(p0.Y, triangle.uv[i0].v / v0.Z, p1.Y, triangle.uv[i1].v / v1.Z, p2.Y, triangle.uv[i2].v / v2.Z);
             var (v012, v02) = (v_list[0], v_list[1]);
             //顶点法线变换，法线没有缩放平移，只有model->world->view 两次旋转
-            var rotate = Matrix4x4.Transpose(mCamera.Transform.MakeYRotationMatrix()) * go.Transform.MakeYRotationMatrix();
+            var rotate = Matrix4x4.Transpose(mCamera.Transform.MakeXRotationMatrix() * mCamera.Transform.MakeYRotationMatrix())
+                * go.Transform.MakeXRotationMatrix() * go.Transform.MakeYRotationMatrix();
             var n0 = Multiply(rotate, new Vector4(triangle.normal[i0], 1));
             var n1 = Multiply(rotate, new Vector4(triangle.normal[i1], 1));
             var n2 = Multiply(rotate, new Vector4(triangle.normal[i2], 1));
@@ -605,7 +625,7 @@ namespace RasterizationRender
             }
 
             //光栅化&着色
-            for (int i=0;i<izL.Count;i++)
+            for (int i = 0; i < xL.Count; i++)
             {
                 int y = (int)p0.Y + i;
                 var izscan = Interpolate(xL[i], izL[i], xR[i], izR[i]);
@@ -616,25 +636,29 @@ namespace RasterizationRender
                 var vscan = Interpolate(xL[i], vL[i], xR[i], vR[i]);
 
                 //渲染像素点x,y
-                for (int j=0;j<izscan.Count;j++)
+                for (int j = 0; j < izscan.Count; j++)
                 {
                     int x = (int)xL[i] + j;
                     float inv_z = izscan[j];
-                    if (UpdateDepthBuffer(x,y, inv_z))
+                    if (UpdateDepthBuffer(x, y, inv_z))
                     {
-                        Vector3 vertex = mCamera.Canvas2ViewPort(new Vector2(x,y), inv_z);
+                        Vector3 vertex = mCamera.Canvas2ViewPort(new Vector2(x, y), inv_z);
                         Vector3 normal = Vector3.Normalize(new Vector3(nxscan[j], nyscan[j], nzscan[j]));
                         float intensity = ComputeIllumination(vertex, normal);
 
-                        float u = uscan[j]/ izscan[j];
-                        float v = vscan[j]/ izscan[j];
-
+                        float u = uscan[j] / izscan[j];
+                        float v = vscan[j] / izscan[j];
+                        u = Clamp01(u);
+                        v = Clamp01(v);
                         Color color = go.Material.GetColor(new UV(u, v));
                         Vector3 vc = new Vector3(color.R, color.G, color.B) * intensity;
                         color = Color.FromArgb((int)vc.X, (int)vc.Y, (int)vc.Z);
-                        
-                        
-                        FrameBuffer.SetPixel(x, y, color);
+
+                        if (color == Color.White)
+                        {
+                            break;
+                        }
+                        FrameBuffer.SetPixel(x + mCamera.Width / 2, y + mCamera.Height / 2, color);
                     }
                 }
             }
@@ -683,8 +707,8 @@ namespace RasterizationRender
                 {
                     illumination += specular;
                 }
-
             }
+            if (illumination > 1) illumination = 1;
             return illumination;
         }
         bool UpdateDepthBuffer(int x, int y, float iz)
@@ -743,13 +767,20 @@ namespace RasterizationRender
             var v01 = Interpolate(y0, v0, y1, v1);
             var v12 = Interpolate(y1, v1, y2, v2);
             var v02 = Interpolate(y0, v0, y2, v2);
-            if(v01.Count+v12.Count>v02.Count)
+            if (v01.Count + v12.Count > v02.Count)
             {
-                v01.RemoveAt(v01.Count - 1);
+                v02.Add(v02.Last());
             }
             v01.AddRange(v12);
 
             return new List<List<float>>() { v01, v02 };
+        }
+
+        float Clamp01(float x)
+        {
+            if (x < 0) return 0;
+            if (x > 1) return 1;
+            return x;
         }
     }
 }
